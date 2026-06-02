@@ -55,12 +55,9 @@ export default eventHandler(async (event) => {
   const { homeURL, linkCacheTtl, caseSensitive, redirectWithQuery, redirectStatusCode } = useRuntimeConfig(event)
   const { cloudflare } = event.context
 
-  if (event.path === '/') {
-    if (homeURL)
-      return sendRedirect(event, homeURL)
-    // No homeURL configured: hide the marketing landing page, act as a pure redirector.
-    throw createError({ status: 404 })
-  }
+  if (event.path === '/' && homeURL)
+    return sendRedirect(event, homeURL)
+  // Otherwise '/' falls through to render the auth-gated clipboard page.
 
   const { notFoundRedirect } = useRuntimeConfig(event)
   // Bypass redirect check for notFoundRedirect path to prevent infinite loop
