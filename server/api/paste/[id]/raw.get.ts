@@ -23,14 +23,22 @@ export default eventHandler(async (event) => {
   // This route is exempt from the global Bearer check (see middleware/2.auth.ts) so a raw
   // link is openable without leaking the master token. Authorize here instead: either the
   // paste's own read key (?k=) or the site token in the Authorization header.
-  const queryKey = getQuery(event).k
+  const query = getQuery(event)
+  const queryKey = query.k
   const headerToken = getHeader(event, 'Authorization')?.replace(BEARER_RE, '')
   const { siteToken } = useRuntimeConfig(event)
-  const authorized
-    = (typeof queryKey === 'string' && safeEqual(queryKey, paste.readKey))
-      || (typeof headerToken === 'string' && safeEqual(headerToken, siteToken))
-  if (!authorized)
+  const viaReadKey = typeof queryKey === 'string' && safeEqual(queryKey, paste.readKey)
+  const viaSiteToken = typeof headerToken === 'string' && safeEqual(headerToken, siteToken)
+  if (!viaReadKey && !viaSiteToken)
     throw createError({ status: 401, statusText: 'Unauthorized' })
+
+  // Read-password gate (applies to the shareable read-key path only; the site-token owner
+  // already has full access).
+  if (paste.password && viaReadKey && !viaSiteToken) {
+    const submitted = typeof query.p === 'string' ? query.p : ''
+    if (!submitted || !await verifyLinkPassword(submitted, paste.password))
+      throw createError({ status: 401, statusText: 'Password required' })
+  }
 
   // Harden: force plain text, block MIME sniffing/execution, hide the key from referers.
   setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
@@ -40,5 +48,10 @@ export default eventHandler(async (event) => {
   setHeader(event, 'Referrer-Policy', 'no-referrer')
   setHeader(event, 'X-Frame-Options', 'DENY')
   setHeader(event, 'Cache-Control', 'no-store')
+
+  // Burn after reading: once delivered through the shareable link, destroy it.
+  if (paste.burn && viaReadKey)
+    await deletePaste(event, id)
+
   return paste.content
 })

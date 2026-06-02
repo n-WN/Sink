@@ -25,7 +25,9 @@ export const DEFAULT_PASTE_TTL = 24 * 3600
 
 const now = () => Math.floor(Date.now() / 1000)
 
-// Stored shape (KV value).
+export const READ_PASSWORD_MAX = 128
+
+// Stored shape (KV value). `password` holds the PBKDF2 hash (never the plaintext).
 export const PasteSchema = z.object({
   id: z.string().trim().max(26).default(() => pasteId()),
   content: z.string().min(1).max(MAX_PASTE_SIZE),
@@ -34,6 +36,10 @@ export const PasteSchema = z.object({
   createdAt: z.number().int().safe().default(now),
   expiration: z.number().int().safe().default(() => now() + DEFAULT_PASTE_TTL),
   readKey: z.string().trim().max(64).default(() => readKey()),
+  // Burn after reading: deleted after the first fetch through the shareable raw link.
+  burn: z.boolean().default(false),
+  // Optional read password (PBKDF2 hash); gates the shareable raw link.
+  password: z.string().optional(),
 })
 
 export type Paste = z.infer<typeof PasteSchema>
@@ -45,6 +51,8 @@ export const CreatePasteSchema = z.object({
   title: z.string().trim().max(128).optional(),
   // Time-to-live in seconds; the link expires (is auto-deleted by KV) afterwards.
   ttl: z.coerce.number().int().min(MIN_PASTE_TTL).max(MAX_PASTE_TTL).optional(),
+  burn: z.boolean().optional(),
+  password: z.string().min(1).max(READ_PASSWORD_MAX).optional(),
 })
 
 export type CreatePaste = z.infer<typeof CreatePasteSchema>
@@ -56,6 +64,8 @@ export interface PasteMeta {
   createdAt: number
   expiration: number
   size: number
+  burn?: boolean
+  hasPassword?: boolean
 }
 
 export interface PasteListItem extends PasteMeta {

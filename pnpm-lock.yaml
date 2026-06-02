@@ -41,9 +41,6 @@ importers:
       '@pinia/nuxt':
         specifier: ^0.11.3
         version: 0.11.3(magicast@0.5.3)(pinia@3.0.4(typescript@5.9.3)(vue@3.5.35(typescript@5.9.3)))
-      '@shikijs/markdown-it':
-        specifier: 4.1.0
-        version: 4.1.0(markdown-it-async@2.2.0)
       '@tailwindcss/vite':
         specifier: ^4.3.0
         version: 4.3.0(vite@7.3.5(@types/node@25.9.1)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.48.0)(yaml@2.9.0))
@@ -116,6 +113,9 @@ importers:
       eslint-plugin-format:
         specifier: ^1.3.1
         version: 1.5.0(eslint@9.39.4(jiti@2.7.0))
+      flourite:
+        specifier: ^1.3.0
+        version: 1.3.0
       fuse.js:
         specifier: ^7.1.0
         version: 7.4.1
@@ -3070,15 +3070,6 @@ packages:
     resolution: {integrity: sha512-nwOMruEkbgdZfQ/b8CgpNBVOpvG1k0N5tbmgiFeqsan401+x3ILqlzZJowSla4Agmq4hG2Uf2wh5jLTEhR8VSg==}
     engines: {node: '>=20'}
 
-  '@shikijs/markdown-it@4.1.0':
-    resolution: {integrity: sha512-qGtTnWF3FG/fDS2wMkE5abMYeGm1l1VVjSUoEOhtr13xk5CtqrdVorEYwKnrLCSpeTjU+j3lY/fWHEJI+m8n6g==}
-    engines: {node: '>=20'}
-    peerDependencies:
-      markdown-it-async: ^2.2.0
-    peerDependenciesMeta:
-      markdown-it-async:
-        optional: true
-
   '@shikijs/primitive@4.1.0':
     resolution: {integrity: sha512-zx2/2Uwj2q9X3KSyYREEhXO23xBw5WUhP4orK2lE4r+t9JGITmEe0JH+wPmJhqHpOT2bRRs6lAL945+LDvOAGw==}
     engines: {node: '>=20'}
@@ -5220,6 +5211,10 @@ packages:
 
   flatted@3.4.2:
     resolution: {integrity: sha512-PjDse7RzhcPkIJwy5t7KPWQSZ9cAbzQXcafsetQoD7sOJRQlGikNbx7yZp2OotDnJyrDcbyRq3Ttb18iYOqkxA==}
+
+  flourite@1.3.0:
+    resolution: {integrity: sha512-iuhWXuX07QwHMnJ1Irh4sD1bk/QFMHg8jVgWsjSAqoIqgIyJtRPnUNKyZAPXrw7pQkDvxb5AIz2KPihEoyVcqw==}
+    engines: {node: '>=16'}
 
   foreground-child@3.3.1:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
@@ -10236,13 +10231,6 @@ snapshots:
     dependencies:
       '@shikijs/types': 4.1.0
 
-  '@shikijs/markdown-it@4.1.0(markdown-it-async@2.2.0)':
-    dependencies:
-      markdown-it: 14.2.0
-      shiki: 4.1.0
-    optionalDependencies:
-      markdown-it-async: 2.2.0
-
   '@shikijs/primitive@4.1.0':
     dependencies:
       '@shikijs/types': 4.1.0
@@ -12650,6 +12638,8 @@ snapshots:
       keyv: 4.5.4
 
   flatted@3.4.2: {}
+
+  flourite@1.3.0: {}
 
   foreground-child@3.3.1:
     dependencies:

@@ -44,7 +44,11 @@ export default defineNuxtConfig({
   },
   routeRules: {
     '/': {
-      // Not prerendered: the root is 404'd at runtime by middleware (pure redirector, no landing page).
+      // Auth-gated clipboard, rendered client-side; never prerender.
+      prerender: false,
+    },
+    '/p/**': {
+      // Deep-linkable paste viewer; client-rendered, never prerender.
       prerender: false,
     },
     '/api/**': {

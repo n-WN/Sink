@@ -16,7 +16,8 @@ export default eventHandler(async (event) => {
   if (!paste)
     throw createError({ status: 404, statusText: 'Paste not found' })
 
-  // Private content: never cache.
+  // Private content: never cache. Strip the password hash; expose only a boolean.
   setHeader(event, 'Cache-Control', 'no-store')
-  return { paste }
+  const { password, ...rest } = paste
+  return { paste: { ...rest, hasPassword: !!password } }
 })

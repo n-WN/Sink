@@ -11,6 +11,8 @@ export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
     createdAt: paste.createdAt,
     expiration: paste.expiration,
     size: paste.content.length,
+    burn: paste.burn || undefined,
+    hasPassword: paste.password ? true : undefined,
   }
   await KV.put(`${PASTE_PREFIX}${paste.id}`, JSON.stringify(paste), {
     expiration: paste.expiration,
@@ -53,6 +55,8 @@ export async function listPastes(event: H3Event, options: { limit: number, curso
       createdAt: meta.createdAt ?? 0,
       expiration: meta.expiration ?? 0,
       size: meta.size ?? 0,
+      burn: meta.burn,
+      hasPassword: meta.hasPassword,
     } satisfies PasteListItem
   })
 

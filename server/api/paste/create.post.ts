@@ -36,6 +36,8 @@ export default eventHandler(async (event) => {
     title: input.title,
     createdAt,
     expiration,
+    burn: input.burn ?? false,
+    password: input.password ? await hashLinkPassword(input.password) : undefined,
   })
 
   await putPaste(event, paste)
@@ -49,6 +51,8 @@ export default eventHandler(async (event) => {
       createdAt: paste.createdAt,
       expiration: paste.expiration,
       size: paste.content.length,
+      burn: paste.burn || undefined,
+      hasPassword: paste.password ? true : undefined,
     },
   }
 })
