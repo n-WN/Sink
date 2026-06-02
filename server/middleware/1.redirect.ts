@@ -1,6 +1,8 @@
 import type { Link } from '@/types'
 import { parsePath, withQuery } from 'ufo'
 
+const TRIM_SLASHES_RE = /^\/|\/$/g
+
 const SOCIAL_BOTS = [
   'applebot',
   'discordbot',
@@ -48,13 +50,17 @@ function hasOgConfig(link: Link): boolean {
 }
 
 export default eventHandler(async (event) => {
-  const { pathname: slug } = parsePath(event.path.replace(/^\/|\/$/g, ''))
+  const { pathname: slug } = parsePath(event.path.replace(TRIM_SLASHES_RE, ''))
   const { slugRegex, reserveSlug } = useAppConfig()
   const { homeURL, linkCacheTtl, caseSensitive, redirectWithQuery, redirectStatusCode } = useRuntimeConfig(event)
   const { cloudflare } = event.context
 
-  if (event.path === '/' && homeURL)
-    return sendRedirect(event, homeURL)
+  if (event.path === '/') {
+    if (homeURL)
+      return sendRedirect(event, homeURL)
+    // No homeURL configured: hide the marketing landing page, act as a pure redirector.
+    throw createError({ status: 404 })
+  }
 
   const { notFoundRedirect } = useRuntimeConfig(event)
   // Bypass redirect check for notFoundRedirect path to prevent infinite loop

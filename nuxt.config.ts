@@ -44,7 +44,8 @@ export default defineNuxtConfig({
   },
   routeRules: {
     '/': {
-      prerender: true,
+      // Not prerendered: the root is 404'd at runtime by middleware (pure redirector, no landing page).
+      prerender: false,
     },
     '/api/**': {
       cors: process.env.NUXT_API_CORS === 'true',
