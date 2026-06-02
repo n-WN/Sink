@@ -158,6 +158,8 @@ export default eventHandler(async (event) => {
       }
 
       if (deviceRedirectUrl) {
+        // Never let browsers/CDNs cache the redirect: links can be edited or deleted.
+        setHeader(event, 'Cache-Control', 'no-store')
         return sendRedirect(event, finalTargetUrl, +redirectStatusCode)
       }
 
@@ -176,6 +178,8 @@ export default eventHandler(async (event) => {
         return html
       }
 
+      // Never let browsers/CDNs cache the redirect: links can be edited or deleted.
+      setHeader(event, 'Cache-Control', 'no-store')
       return sendRedirect(event, finalTargetUrl, +redirectStatusCode)
     }
     else {
