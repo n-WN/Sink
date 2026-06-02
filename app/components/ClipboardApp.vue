@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PasteListItem } from '#shared/schemas/paste'
-import { Check, ClipboardList, Copy, Download, Flame, KeyRound, Link2, Loader, Lock, Plus, Trash2, Wand2 } from 'lucide-vue-next'
+import { ArrowLeft, Check, ClipboardList, Copy, Download, ExternalLink, Flame, KeyRound, Link2, Loader, Lock, Plus, Scissors, Share2, Trash2, Wand2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useAuthToken } from '@/composables/useAuthToken'
 import { HIGHLIGHT_LANGS, highlightFallback, highlightToHtml, resolveLang } from '@/composables/useHighlighter'
@@ -159,13 +159,19 @@ async function createPaste() {
   }
 }
 
+let openRun = 0
 async function openPaste(id: string) {
+  const run = ++openRun
   try {
     const res = await useAPI<{ paste: PasteFull }>(`/api/paste/${id}`)
+    if (run !== openRun)
+      return // a newer selection won; drop this stale response
     selected.value = res.paste
     view.value = resolveLang(res.paste.lang) === 'markdown' ? 'preview' : 'highlight'
   }
   catch (e) {
+    if (run !== openRun)
+      return
     selected.value = null
     toast.error('Failed to open', { description: e instanceof Error ? e.message : String(e) })
   }
@@ -240,10 +246,78 @@ async function copyText(text: string, label = 'Copied') {
   }
 }
 
-function copyRawUrl(p: PasteFull) {
-  copyText(rawUrl(p), 'Raw URL copied')
+function viewUrl(p: PasteFull): string {
+  return `${origin.value}/s/${p.id}?k=${encodeURIComponent(p.readKey)}`
+}
+
+const shareOpen = ref(false)
+const shortening = ref(false)
+const shortLink = ref('')
+
+function passwordHint(p: PasteFull) {
   if (p.hasPassword)
-    toast.info('Password-protected', { description: 'Append &p=<password> to the raw URL.' })
+    toast.info('Password-protected', { description: 'Share the read password separately.' })
+}
+
+function copyViewUrl(p: PasteFull) {
+  copyText(viewUrl(p), 'View link copied')
+  passwordHint(p)
+  shareOpen.value = false
+}
+
+function copyRawUrl(p: PasteFull) {
+  copyText(rawUrl(p), 'Raw link copied')
+  passwordHint(p)
+  shareOpen.value = false
+}
+
+// Integrate with the link shortener: turn the share view URL into a short slug, then copy it.
+// The clipboard write must START inside the click's user-activation window, so we hand the
+// Clipboard API a deferred Blob promise rather than awaiting the network first (a plain
+// writeText after `await` is rejected by the browser as a non-user-gesture write).
+async function shorten(p: PasteFull) {
+  shortening.value = true
+  shortLink.value = ''
+  const linkPromise = useAPI<{ shortLink: string }>('/api/link/create', {
+    method: 'POST',
+    body: { url: viewUrl(p), comment: `paste:${p.id}`, expiration: p.expiration },
+  }).then(res => res.shortLink)
+
+  try {
+    let writePromise: Promise<void> | undefined
+    const canDeferredWrite = import.meta.client && window.isSecureContext
+      && typeof ClipboardItem !== 'undefined' && !!navigator.clipboard?.write
+    if (canDeferredWrite) {
+      writePromise = navigator.clipboard.write([
+        new ClipboardItem({ 'text/plain': linkPromise.then(l => new Blob([l], { type: 'text/plain' })) }),
+      ])
+    }
+
+    shortLink.value = await linkPromise // surfaces network errors
+
+    if (writePromise) {
+      await writePromise
+      toast.success('Short link copied')
+      passwordHint(p)
+      shareOpen.value = false
+    }
+    else {
+      // Clipboard unavailable: keep the menu open with the copyable field.
+      toast.info('Short link ready', { description: 'Copy it from the field below.' })
+    }
+  }
+  catch (e) {
+    if (shortLink.value) {
+      // Link created but the clipboard write was blocked — show it for manual copy.
+      toast.warning('Copy blocked', { description: 'Copy the short link from the field below.' })
+    }
+    else {
+      toast.error('Failed to shorten', { description: e instanceof Error ? e.message : String(e) })
+    }
+  }
+  finally {
+    shortening.value = false
+  }
 }
 
 function downloadPaste(p: PasteFull) {
@@ -370,12 +444,15 @@ onMounted(async () => {
           lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]
         "
       >
-        <!-- Left: composer + list -->
+        <!-- Left: composer + list (hidden on phones while a snippet is open) -->
         <section
           class="
-            flex min-h-0 min-w-0 flex-col gap-4 overflow-auto
-            bg-[var(--bg-base)] p-4
+            min-h-0 min-w-0 flex-col gap-4 overflow-auto bg-[var(--bg-base)] p-4
           "
+          :class="selected ? `
+            hidden
+            lg:flex
+          ` : 'flex'"
         >
           <div class="rounded-lg border border-[var(--border-subtle)]">
             <input
@@ -507,8 +584,14 @@ onMounted(async () => {
           </div>
         </section>
 
-        <!-- Right: viewer -->
-        <section class="min-h-0 min-w-0 overflow-hidden bg-[var(--bg-base)]">
+        <!-- Right: viewer (full screen on phones; empty prompt hidden on phones) -->
+        <section
+          class="min-h-0 min-w-0 overflow-hidden bg-[var(--bg-base)]"
+          :class="selected ? 'block' : `
+            hidden
+            lg:block
+          `"
+        >
           <div v-if="selected" class="flex h-full min-h-0 min-w-0 flex-col">
             <div
               class="
@@ -517,6 +600,16 @@ onMounted(async () => {
               "
             >
               <div class="flex min-w-0 items-center gap-2">
+                <span
+                  class="
+                    contents
+                    lg:hidden
+                  "
+                >
+                  <button type="button" class="icon-btn" title="Back" @click="navigateTo('/')">
+                    <ArrowLeft :size="15" :stroke-width="1.75" />
+                  </button>
+                </span>
                 <Flame
                   v-if="selected.burn" :size="14" :stroke-width="1.75" class="
                     shrink-0 text-[var(--danger)]
@@ -560,9 +653,41 @@ onMounted(async () => {
                   <Check v-if="copied" :size="14" :stroke-width="1.75" />
                   <Copy v-else :size="14" :stroke-width="1.75" />
                 </button>
-                <button type="button" class="icon-btn" title="Copy raw URL" @click="copyRawUrl(selected)">
-                  <Link2 :size="14" :stroke-width="1.75" />
-                </button>
+                <div class="relative">
+                  <button type="button" class="icon-btn" title="Share" @click="shareOpen = !shareOpen">
+                    <Share2 :size="14" :stroke-width="1.75" />
+                  </button>
+                  <template v-if="shareOpen">
+                    <div class="fixed inset-0 z-10" @click="shareOpen = false; shortLink = ''" />
+                    <div class="share-menu">
+                      <button type="button" class="share-item" @click="copyViewUrl(selected)">
+                        <ExternalLink :size="13" :stroke-width="1.75" /> View link
+                      </button>
+                      <button type="button" class="share-item" @click="copyRawUrl(selected)">
+                        <Link2 :size="13" :stroke-width="1.75" /> Raw link
+                      </button>
+                      <button type="button" class="share-item" :disabled="shortening" @click="shorten(selected)">
+                        <Scissors :size="13" :stroke-width="1.75" /> {{ shortening ? 'Shortening…' : 'Short link' }}
+                      </button>
+                      <div
+                        v-if="shortLink" class="
+                          mt-1 border-t border-[var(--border-subtle)] p-1.5
+                        "
+                      >
+                        <input
+                          :value="shortLink"
+                          readonly
+                          aria-label="Short URL"
+                          class="field w-full"
+                          @focus="(e) => (e.target as HTMLInputElement).select()"
+                        >
+                        <button type="button" class="share-item mt-1" @click="copyText(shortLink, 'Short link copied')">
+                          <Copy :size="13" :stroke-width="1.75" /> Copy short link
+                        </button>
+                      </div>
+                    </div>
+                  </template>
+                </div>
                 <button type="button" class="icon-btn" title="Download" @click="downloadPaste(selected)">
                   <Download :size="14" :stroke-width="1.75" />
                 </button>
@@ -623,242 +748,3 @@ onMounted(async () => {
     </ClientOnly>
   </div>
 </template>
-
-<style>
-/* Vitesse / antfu palette — scoped to .clip so it never leaks into the dashboard. */
-.clip {
-  --bg-base: #ffffff;
-  --bg-inline: #f4f4f5;
-  --bg-hover: #f4f4f5;
-  --bg-code: #ffffff;
-  --fg-primary: #11151c;
-  --fg-muted: #75797f;
-  --fg-faint: #a0a3a8;
-  --border-subtle: #ededee;
-  --border-strong: #dbdcdf;
-  --accent: #4d9375;
-  --accent-hover: #3f7c62;
-  --accent-soft: #4d937514;
-  --danger: #ab5959;
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
-  font-family: var(--font-sans);
-  scrollbar-width: thin;
-  scrollbar-color: var(--border-strong) transparent;
-}
-
-.dark .clip {
-  --bg-base: #121212;
-  --bg-inline: #1b1b1c;
-  --bg-hover: #171717;
-  --bg-code: #121212;
-  --fg-primary: #e9e6e0;
-  --fg-muted: #8a877f;
-  --fg-faint: #5a5853;
-  --border-subtle: #262626;
-  --border-strong: #2f2f30;
-  --accent: #4d9375;
-  --accent-hover: #6cb196;
-  --accent-soft: #4d937522;
-  --danger: #cb7676;
-}
-
-.clip .mono-label {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--fg-muted);
-}
-
-.clip .field {
-  height: 2.25rem;
-  border: 1px solid var(--border-subtle);
-  border-radius: 0.375rem;
-  background: var(--bg-base);
-  padding: 0 0.5rem;
-  font-size: 13px;
-  color: var(--fg-primary);
-  outline: none;
-  transition: border-color 0.15s;
-}
-.clip input.field {
-  background: var(--bg-inline);
-  font-family: var(--font-mono);
-  padding: 0.5rem 0.75rem;
-}
-.clip .field:focus-visible {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent);
-}
-
-.clip .btn-accent {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  border-radius: 0.375rem;
-  background: var(--accent);
-  padding: 0 0.625rem;
-  height: 2.25rem;
-  font-size: 12px;
-  font-weight: 500;
-  color: #fff;
-  transition: background 0.15s;
-}
-.clip .btn-accent:hover {
-  background: var(--accent-hover);
-}
-.clip .btn-accent:disabled {
-  opacity: 0.6;
-}
-
-.clip .icon-btn {
-  display: grid;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 0.375rem;
-  color: var(--fg-muted);
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-.clip .icon-btn:hover {
-  background: var(--bg-hover);
-  color: var(--fg-primary);
-}
-
-/* Code/markdown views: internal scroll comes from the flex parent (min-h-0/overflow-auto);
-   these only set typography and let wide lines scroll horizontally. */
-.clip .paste-code,
-.clip .paste-raw,
-.clip .md-body {
-  min-width: 0;
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
-}
-.clip .paste-raw {
-  padding: 1rem;
-  font-family: var(--font-mono);
-  white-space: pre;
-  color: var(--fg-primary);
-  width: max-content;
-  min-width: 100%;
-}
-.clip .paste-code .shiki {
-  padding: 1rem;
-  background: transparent !important;
-  width: max-content;
-  min-width: 100%;
-}
-.clip .paste-code .shiki,
-.clip .paste-code .shiki span {
-  color: var(--shiki-light, var(--fg-primary));
-}
-.dark .clip .paste-code .shiki,
-.dark .clip .paste-code .shiki span {
-  color: var(--shiki-dark, var(--fg-primary)) !important;
-}
-
-/* Markdown preview — Vitesse-tuned typography. */
-.clip .md-body {
-  padding: 1.25rem 1.5rem;
-  font-family: var(--font-sans);
-  font-size: 14.5px;
-  color: var(--fg-primary);
-}
-.clip .md-body h1,
-.clip .md-body h2,
-.clip .md-body h3 {
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  margin: 1.4em 0 0.6em;
-  line-height: 1.3;
-}
-.clip .md-body h1 {
-  font-size: 1.5em;
-}
-.clip .md-body h2 {
-  font-size: 1.25em;
-  border-bottom: 1px solid var(--border-subtle);
-  padding-bottom: 0.3em;
-}
-.clip .md-body h3 {
-  font-size: 1.1em;
-}
-.clip .md-body p,
-.clip .md-body ul,
-.clip .md-body ol,
-.clip .md-body blockquote {
-  margin: 0.75em 0;
-}
-.clip .md-body ul,
-.clip .md-body ol {
-  padding-left: 1.4em;
-}
-.clip .md-body li {
-  margin: 0.25em 0;
-}
-.clip .md-body a {
-  color: var(--accent);
-  text-decoration: none;
-}
-.clip .md-body a:hover {
-  text-decoration: underline;
-}
-.clip .md-body code {
-  font-family: var(--font-mono);
-  font-size: 0.875em;
-  background: var(--bg-inline);
-  padding: 0.15em 0.35em;
-  border-radius: 4px;
-}
-.clip .md-body pre {
-  background: var(--bg-inline);
-  border-radius: 8px;
-  padding: 0;
-  overflow: auto;
-  margin: 0.9em 0;
-}
-.clip .md-body pre code {
-  background: none;
-  padding: 0;
-}
-.clip .md-body pre.shiki {
-  padding: 0.9rem 1rem;
-  background: transparent !important;
-}
-.clip .md-body pre.shiki,
-.clip .md-body pre.shiki span {
-  color: var(--shiki-light, var(--fg-primary));
-}
-.dark .clip .md-body pre.shiki,
-.dark .clip .md-body pre.shiki span {
-  color: var(--shiki-dark, var(--fg-primary)) !important;
-}
-.clip .md-body blockquote {
-  border-left: 3px solid var(--border-strong);
-  padding-left: 1em;
-  color: var(--fg-muted);
-}
-.clip .md-body table {
-  border-collapse: collapse;
-  font-size: 0.9em;
-}
-.clip .md-body th,
-.clip .md-body td {
-  border: 1px solid var(--border-subtle);
-  padding: 0.4em 0.7em;
-}
-.clip .md-body hr {
-  border: none;
-  border-top: 1px solid var(--border-subtle);
-  margin: 1.5em 0;
-}
-.clip .md-body img {
-  max-width: 100%;
-  border-radius: 8px;
-}
-</style>

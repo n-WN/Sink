@@ -50,6 +50,15 @@ export default eventHandler(async (event) => {
 
   await prepareIncomingLink(event, link)
 
+  // Reserved slugs are served by Nuxt routes (e.g. /dashboard, /p, /s), so a short link on
+  // them would never redirect. Reject instead of silently creating a dead link.
+  if (useAppConfig().reserveSlug.includes(link.slug)) {
+    throw createError({
+      status: 409,
+      statusText: 'Slug is reserved',
+    })
+  }
+
   const existingLink = await getLink(event, link.slug)
   if (existingLink) {
     throw createError({

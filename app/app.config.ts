@@ -10,5 +10,7 @@ export default defineAppConfig({
   slugRegex: /^[a-z0-9]+(?:-[a-z0-9]+)*$/i,
   reserveSlug: [
     'dashboard',
+    'p', // clipboard paste viewer (/p/:id)
+    's', // public paste share (/s/:id)
   ],
 })

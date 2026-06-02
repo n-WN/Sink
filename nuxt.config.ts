@@ -14,7 +14,7 @@ export default defineNuxtConfig({
     'shadcn-nuxt',
   ],
   devtools: { enabled: true },
-  css: ['@/assets/css/tailwind.css'],
+  css: ['@/assets/css/tailwind.css', '@/assets/css/clip.css'],
   colorMode: {
     classSuffix: '',
   },
@@ -50,6 +50,16 @@ export default defineNuxtConfig({
     '/p/**': {
       // Deep-linkable paste viewer; client-rendered, never prerender.
       prerender: false,
+    },
+    '/s/**': {
+      // Public read-key share view; never prerender/cache/index. The read key lives in the
+      // URL, so keep it out of caches, referers and search engines.
+      prerender: false,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        'X-Robots-Tag': 'noindex, nofollow',
+      },
     },
     '/api/**': {
       cors: process.env.NUXT_API_CORS === 'true',
