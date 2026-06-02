@@ -23,6 +23,10 @@ export const MIN_PASTE_TTL = 60
 export const MAX_PASTE_TTL = 30 * 24 * 3600
 export const DEFAULT_PASTE_TTL = 24 * 3600
 
+// Cap the number of live snippets to stay within the free-tier KV budget and prevent
+// a runaway client from filling storage. Generous for a single-user clipboard.
+export const MAX_ACTIVE_PASTES = 1000
+
 const now = () => Math.floor(Date.now() / 1000)
 
 export const READ_PASSWORD_MAX = 128

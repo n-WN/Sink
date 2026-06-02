@@ -1,7 +1,18 @@
 import type { H3Event } from 'h3'
 import type { Paste, PasteListItem, PasteMeta } from '#shared/schemas/paste'
+import { MAX_ACTIVE_PASTES } from '#shared/schemas/paste'
 
 const PASTE_PREFIX = 'paste:'
+
+// True when there are already MAX_ACTIVE_PASTES live snippets (one cheap list op).
+// Guards the free-tier KV budget against a runaway client filling storage.
+// Count the keys directly: when exactly MAX exist, `list_complete` is still true (the page
+// is full but there is no next page), so checking key count avoids an off-by-one.
+export async function pasteCapReached(event: H3Event): Promise<boolean> {
+  const { KV } = event.context.cloudflare.env
+  const list = await KV.list({ prefix: PASTE_PREFIX, limit: MAX_ACTIVE_PASTES })
+  return list.keys.length >= MAX_ACTIVE_PASTES
+}
 
 export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
   const { KV } = event.context.cloudflare.env

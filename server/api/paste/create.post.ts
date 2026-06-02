@@ -26,6 +26,10 @@ defineRouteMeta({
 
 export default eventHandler(async (event) => {
   const input = await readValidatedBody(event, CreatePasteSchema.parse)
+
+  if (await pasteCapReached(event))
+    throw createError({ status: 429, statusText: 'Too many active snippets' })
+
   const createdAt = Math.floor(Date.now() / 1000)
   const expiration = createdAt + (input.ttl ?? DEFAULT_PASTE_TTL)
 

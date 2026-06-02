@@ -53,12 +53,12 @@ type Renderer = (src: string) => Promise<string>
 let rendererPromise: Promise<Renderer> | null = null
 
 async function buildRenderer(): Promise<Renderer> {
-  const [{ MarkdownItAsync }, { default: DOMPurify }] = await Promise.all([
+  const [{ createMarkdownItAsync }, { default: DOMPurify }] = await Promise.all([
     import('markdown-it-async'),
     import('dompurify'),
   ])
 
-  const md = MarkdownItAsync({
+  const md = createMarkdownItAsync({
     html: false, // never trust raw inline HTML from arbitrary pastes
     linkify: true,
     breaks: false,
