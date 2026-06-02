@@ -11,9 +11,11 @@ export const pasteId = customAlphabet(PASTE_ID_ALPHABET, 8)
 // eslint-disable-next-line regexp/prefer-range
 export const PASTE_ID_RE = new RegExp(`^[${PASTE_ID_ALPHABET}]{8}$`)
 
-// Per-paste read key: a 24-char secret embedded in the shareable raw URL so a leaked
-// raw link only exposes that single paste (read-only), never the master site token.
-export const readKey = customAlphabet('ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789', 24)
+// Per-paste read key: the secret in the shareable link so a leak only exposes that one
+// paste (read-only), never the site token. Uses the SAME unambiguous, lowercase alphabet
+// as the id (no 0/1/i/l/o) so it is easy to type by hand. 10 chars over 31 symbols is
+// ~2^50 of keyspace — short and typeable, well above a brute-force concern.
+export const readKey = customAlphabet(PASTE_ID_ALPHABET, 10)
 
 // Clipboard is for text snippets, not large files: cap at 512 KB.
 export const MAX_PASTE_SIZE = 512 * 1024
