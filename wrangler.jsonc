@@ -36,6 +36,14 @@
       "binding": "KV",
       "id": "ec9afaf497ff44f8a7815cea4140238d"
     }
+  ],
+  // Workers Rate Limiting (free, per-colo). Guards the public, id-addressed paste endpoints
+  // against id/password brute force, and the token check against guessing. namespace_id is an
+  // arbitrary unique number; no dashboard setup needed for the `simple` limiter.
+  "ratelimits": [
+    { "name": "RL_PASTE_IP", "namespace_id": "2001", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_PASTE_ID", "namespace_id": "2002", "simple": { "limit": 20, "period": 60 } },
+    { "name": "RL_VERIFY", "namespace_id": "2003", "simple": { "limit": 10, "period": 60 } }
   ]
   // r2_buckets and backup cron removed: deploy token has no R2 scope.
   // OG-image upload + daily KV->R2 backup are disabled (NUXT_DISABLE_AUTO_BACKUP=true).

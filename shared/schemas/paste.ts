@@ -11,12 +11,6 @@ export const pasteId = customAlphabet(PASTE_ID_ALPHABET, 8)
 // eslint-disable-next-line regexp/prefer-range
 export const PASTE_ID_RE = new RegExp(`^[${PASTE_ID_ALPHABET}]{8}$`)
 
-// Per-paste read key: the secret in the shareable link so a leak only exposes that one
-// paste (read-only), never the site token. Uses the SAME unambiguous, lowercase alphabet
-// as the id (no 0/1/i/l/o) so it is easy to type by hand. 10 chars over 31 symbols is
-// ~2^50 of keyspace — short and typeable, well above a brute-force concern.
-export const readKey = customAlphabet(PASTE_ID_ALPHABET, 10)
-
 // Clipboard is for text snippets, not large files: cap at 512 KB.
 export const MAX_PASTE_SIZE = 512 * 1024
 
@@ -41,10 +35,9 @@ export const PasteSchema = z.object({
   title: z.string().trim().max(128).optional(),
   createdAt: z.number().int().safe().default(now),
   expiration: z.number().int().safe().default(() => now() + DEFAULT_PASTE_TTL),
-  readKey: z.string().trim().max(64).default(() => readKey()),
-  // Burn after reading: deleted after the first fetch through the shareable raw link.
+  // Burn after reading: deleted after the first public (non-owner) fetch.
   burn: z.boolean().default(false),
-  // Optional read password (PBKDF2 hash); gates the shareable raw link.
+  // Optional read password (PBKDF2 hash); gates public access to a snippet.
   password: z.string().optional(),
 })
 

@@ -19,7 +19,6 @@ interface SharedPaste {
 
 const route = useRoute()
 const id = computed(() => String(route.params.id ?? ''))
-const key = computed(() => String(route.query.k ?? ''))
 
 const status = ref<'loading' | 'ok' | 'password' | 'error'>('loading')
 const errorMsg = ref('')
@@ -47,14 +46,13 @@ let loadRun = 0
 async function load(password?: string) {
   const run = ++loadRun
   const reqId = id.value
-  const reqKey = key.value
   submitting.value = true
   try {
     const res = await $fetch<SharedPaste>(`/api/paste/${reqId}/share`, {
       method: 'POST',
-      body: { k: reqKey, password },
+      body: { password },
     })
-    if (run !== loadRun || reqId !== id.value || reqKey !== key.value)
+    if (run !== loadRun || reqId !== id.value)
       return // route changed mid-flight; drop stale response
     paste.value = res
     view.value = resolveLang(res.lang) === 'markdown' ? 'preview' : 'highlight'
@@ -62,7 +60,7 @@ async function load(password?: string) {
     await renderView()
   }
   catch (e: unknown) {
-    if (run !== loadRun || reqId !== id.value || reqKey !== key.value)
+    if (run !== loadRun || reqId !== id.value)
       return
     const err = e as { status?: number, data?: { data?: { hasPassword?: boolean } } }
     if (err.status === 401 && err.data?.data?.hasPassword) {
@@ -76,7 +74,7 @@ async function load(password?: string) {
     }
     else if (err.status === 401) {
       status.value = 'error'
-      errorMsg.value = 'Invalid or missing share key.'
+      errorMsg.value = 'Access denied.'
     }
     else {
       status.value = 'error'
@@ -114,17 +112,12 @@ async function renderView() {
 watch(view, () => renderView())
 
 // Re-fetch when navigating between /s links in the same tab (component is reused).
-watch([() => route.params.id, () => route.query.k], () => {
+watch(() => route.params.id, () => {
   paste.value = null
   highlighted.value = ''
   rendered.value = ''
   passwordInput.value = ''
   errorMsg.value = ''
-  if (!key.value) {
-    status.value = 'error'
-    errorMsg.value = 'Missing share key.'
-    return
-  }
   status.value = 'loading'
   load()
 })
@@ -151,11 +144,6 @@ function download() {
 }
 
 onMounted(() => {
-  if (!key.value) {
-    status.value = 'error'
-    errorMsg.value = 'Missing share key.'
-    return
-  }
   load()
 })
 </script>

@@ -16,8 +16,10 @@ export default eventHandler(async (event) => {
   if (!paste)
     throw createError({ status: 404, statusText: 'Paste not found' })
 
-  // Private content: never cache. Strip the password hash; expose only a boolean.
+  // Private content: never cache. Strip the password hash (expose only a boolean) and any
+  // legacy readKey left on old KV entries (no longer used; id-only access now).
   setHeader(event, 'Cache-Control', 'no-store')
-  const { password, ...rest } = paste
+  const { password, readKey, ...rest } = paste as typeof paste & { readKey?: string }
+  void readKey
   return { paste: { ...rest, hasPassword: !!password } }
 })

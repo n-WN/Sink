@@ -13,7 +13,6 @@ type ViewMode = 'highlight' | 'raw' | 'preview'
 
 interface PasteFull extends PasteListItem {
   content: string
-  readKey: string
 }
 
 const TTL_OPTIONS = [
@@ -49,7 +48,7 @@ let renderRun = 0
 const origin = computed(() => (import.meta.client ? window.location.origin : ''))
 
 function rawUrl(p: PasteFull): string {
-  return `${origin.value}/api/paste/${p.id}/raw?k=${encodeURIComponent(p.readKey)}`
+  return `${origin.value}/api/paste/${p.id}/raw`
 }
 
 function formatBytes(size: number): string {
@@ -247,7 +246,7 @@ async function copyText(text: string, label = 'Copied') {
 }
 
 function viewUrl(p: PasteFull): string {
-  return `${origin.value}/s/${p.id}?k=${encodeURIComponent(p.readKey)}`
+  return `${origin.value}/s/${p.id}`
 }
 
 const shareOpen = ref(false)
