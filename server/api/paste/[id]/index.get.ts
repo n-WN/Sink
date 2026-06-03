@@ -12,14 +12,27 @@ export default eventHandler(async (event) => {
   if (!id || !PASTE_ID_RE.test(id))
     throw createError({ status: 400, statusText: 'Invalid id' })
 
-  const paste = await getPaste(event, id)
-  if (!paste)
+  const record = await getPasteRecord(event, id)
+  if (!record)
     throw createError({ status: 404, statusText: 'Paste not found' })
 
-  // Private content: never cache. Strip the password hash (expose only a boolean) and any
-  // legacy readKey left on old KV entries (no longer used; id-only access now).
+  // Private content: never cache. Never return the password hash or the raw bytes (the owner
+  // viewer loads a file from /raw with the site token).
   setHeader(event, 'Cache-Control', 'no-store')
-  const { password, readKey, ...rest } = paste as typeof paste & { readKey?: string }
-  void readKey
-  return { paste: { ...rest, hasPassword: !!password } }
+  return {
+    paste: {
+      id: record.id,
+      kind: record.kind,
+      lang: record.lang,
+      title: record.title,
+      createdAt: record.createdAt,
+      expiration: record.expiration,
+      burn: record.burn,
+      hasPassword: !!record.password,
+      size: record.size,
+      mime: record.mime,
+      filename: record.filename,
+      content: record.kind === 'text' ? record.content : undefined,
+    },
+  }
 })

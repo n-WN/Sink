@@ -1,12 +1,13 @@
-import { PASTE_ID_RE } from '#shared/schemas/paste'
+import { INLINE_IMAGE_MIME, PASTE_ID_RE } from '#shared/schemas/paste'
 
 const BEARER_RE = /^Bearer\s+/
+const UNSAFE_FILENAME_RE = /["\\\r\n]/g
 
 defineRouteMeta({
   openAPI: {
-    description: 'Get the raw text of a clipboard entry as text/plain. Public: authorized by '
-      + 'the (unguessable) snippet id; the read password (?p=) is required if the snippet has one. '
-      + 'The site-token Authorization header bypasses the password and never triggers burn.',
+    description: 'Get the raw bytes of a clipboard entry (text/plain for text snippets, the '
+      + 'original Content-Type for files). Public: authorized by the (unguessable) snippet id; '
+      + 'the read password (?p=) is required if set. The site token bypasses the password and burn.',
   },
 })
 
@@ -15,8 +16,8 @@ export default eventHandler(async (event) => {
   if (!id || !PASTE_ID_RE.test(id))
     throw createError({ status: 400, statusText: 'Invalid id' })
 
-  const paste = await getPaste(event, id)
-  if (!paste)
+  const record = await getPasteRecord(event, id)
+  if (!record)
     throw createError({ status: 404, statusText: 'Paste not found' })
 
   // Public access is by snippet id (an unguessable, rate-limited capability). The site token
@@ -25,24 +26,40 @@ export default eventHandler(async (event) => {
   const { siteToken } = useRuntimeConfig(event)
   const viaSiteToken = typeof headerToken === 'string' && safeEqual(headerToken, siteToken)
 
-  if (paste.password && !viaSiteToken) {
-    const submitted = typeof getQuery(event).p === 'string' ? String(getQuery(event).p) : ''
-    if (!submitted || !await verifyLinkPassword(submitted, paste.password))
+  if (record.password && !viaSiteToken) {
+    // Password may come via header (preferred — keeps it out of URLs/logs) or ?p= (curl).
+    const submitted = getHeader(event, 'x-paste-password')
+      || (typeof getQuery(event).p === 'string' ? String(getQuery(event).p) : '')
+    if (!submitted || !await verifyLinkPassword(submitted, record.password))
       throw createError({ status: 401, statusText: 'Password required' })
   }
 
-  // Harden: force plain text, block MIME sniffing/execution, drop the referer.
-  setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
+  // Harden every response: no MIME sniffing/execution, no referer, no caching.
   setHeader(event, 'X-Content-Type-Options', 'nosniff')
   setHeader(event, 'Content-Security-Policy', 'default-src \'none\'; sandbox')
-  setHeader(event, 'Content-Disposition', 'inline; filename="paste.txt"')
   setHeader(event, 'Referrer-Policy', 'no-referrer')
   setHeader(event, 'X-Frame-Options', 'DENY')
   setHeader(event, 'Cache-Control', 'no-store')
 
   // Burn after reading: destroy on the first public delivery (owner reads do not burn).
-  if (paste.burn && !viaSiteToken)
-    await deletePaste(event, id)
+  const burn = async () => {
+    if (record.burn && !viaSiteToken)
+      await deletePaste(event, id)
+  }
 
-  return paste.content
+  if (record.kind === 'file') {
+    const mime = record.mime || 'application/octet-stream'
+    // Only known-safe raster images are shown inline; SVG/HTML/unknown are forced to download.
+    const inline = INLINE_IMAGE_MIME.has(mime)
+    const name = (record.filename || `${id}`).replace(UNSAFE_FILENAME_RE, '_')
+    setHeader(event, 'Content-Type', mime)
+    setHeader(event, 'Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${name}"`)
+    await burn()
+    return new Uint8Array(record.bytes as ArrayBuffer)
+  }
+
+  setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
+  setHeader(event, 'Content-Disposition', 'inline; filename="paste.txt"')
+  await burn()
+  return record.content
 })

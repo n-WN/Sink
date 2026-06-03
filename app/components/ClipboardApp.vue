@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PasteListItem } from '#shared/schemas/paste'
-import { ArrowLeft, Check, ClipboardList, Copy, Download, ExternalLink, Flame, KeyRound, Link2, Loader, Lock, Plus, Scissors, Share2, Trash2, Wand2 } from 'lucide-vue-next'
+import { ArrowLeft, Check, ClipboardList, Copy, Download, ExternalLink, File as FileIcon, Flame, Image as ImageIcon, KeyRound, Link2, Loader, Lock, Paperclip, Plus, Scissors, Share2, Trash2, Wand2 } from 'lucide-vue-next'
 import { toast } from 'vue-sonner'
 import { useAuthToken } from '@/composables/useAuthToken'
 import { HIGHLIGHT_LANGS, highlightFallback, highlightToHtml, resolveLang } from '@/composables/useHighlighter'
@@ -12,7 +12,14 @@ const props = defineProps<{ routeId?: string }>()
 type ViewMode = 'highlight' | 'raw' | 'preview'
 
 interface PasteFull extends PasteListItem {
-  content: string
+  content?: string
+}
+
+const MAX_FILE_SIZE = 1024 * 1024
+const INLINE_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
+
+function isInlineImage(p: { kind?: string, mime?: string }): boolean {
+  return p.kind === 'file' && !!p.mime && INLINE_IMAGE_MIME.has(p.mime)
 }
 
 const TTL_OPTIONS = [
@@ -158,15 +165,96 @@ async function createPaste() {
   }
 }
 
+const fileInput = ref<HTMLInputElement>()
+const dragOver = ref(false)
+
+async function uploadFile(file: File) {
+  if (file.size === 0) {
+    toast.error('Empty file')
+    return
+  }
+  if (file.size > MAX_FILE_SIZE) {
+    toast.error('File too large', { description: `Max ${(MAX_FILE_SIZE / 1024 / 1024).toFixed(0)} MB.` })
+    return
+  }
+  creating.value = true
+  try {
+    const form = new FormData()
+    form.append('file', file, file.name)
+    if (draft.title)
+      form.append('title', draft.title)
+    form.append('ttl', String(draft.ttl))
+    if (draft.burn)
+      form.append('burn', 'true')
+    if (draft.password)
+      form.append('password', draft.password)
+    const res = await useAPI<{ paste: PasteListItem }>('/api/paste/create', { method: 'POST', body: form })
+    pastes.value = [res.paste, ...pastes.value]
+    draft.title = ''
+    draft.password = ''
+    draft.burn = false
+    toast.success('Uploaded', { description: file.name })
+    navigateTo(`/p/${res.paste.id}`)
+  }
+  catch (e) {
+    toast.error('Upload failed', { description: e instanceof Error ? e.message : String(e) })
+  }
+  finally {
+    creating.value = false
+  }
+}
+
+function onPickFile(e: Event) {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (file)
+    uploadFile(file);
+  (e.target as HTMLInputElement).value = ''
+}
+
+function onDrop(e: DragEvent) {
+  dragOver.value = false
+  const file = e.dataTransfer?.files?.[0]
+  if (file)
+    uploadFile(file)
+}
+
+function onComposerPaste(e: ClipboardEvent) {
+  const file = e.clipboardData?.files?.[0]
+  if (file) {
+    e.preventDefault()
+    uploadFile(file)
+  }
+}
+
+const fileUrl = ref('') // object URL of the selected file (owner fetch, so burn/password-safe)
+
+function clearFileUrl() {
+  if (fileUrl.value) {
+    URL.revokeObjectURL(fileUrl.value)
+    fileUrl.value = ''
+  }
+}
+
 let openRun = 0
 async function openPaste(id: string) {
   const run = ++openRun
+  clearFileUrl()
   try {
     const res = await useAPI<{ paste: PasteFull }>(`/api/paste/${id}`)
     if (run !== openRun)
       return // a newer selection won; drop this stale response
     selected.value = res.paste
     view.value = resolveLang(res.paste.lang) === 'markdown' ? 'preview' : 'highlight'
+    if (res.paste.kind === 'file') {
+      // Fetch the bytes WITH the site token so the owner never burns their own file and
+      // password-protected files still load (owner bypass), then show via an object URL.
+      const blob = await $fetch<Blob>(`/api/paste/${id}/raw`, {
+        headers: { Authorization: `Bearer ${getToken() || ''}` },
+        responseType: 'blob',
+      })
+      if (run === openRun)
+        fileUrl.value = URL.createObjectURL(blob)
+    }
   }
   catch (e) {
     if (run !== openRun)
@@ -192,15 +280,16 @@ async function removePaste(id: string) {
 // Single render path, guarded against out-of-order async results (Codex finding).
 async function renderViewFor(paste: PasteFull | null, mode: ViewMode) {
   const run = ++renderRun
-  if (!paste) {
+  if (!paste || paste.kind === 'file') {
     highlighted.value = ''
     rendered.value = ''
     return
   }
+  const content = paste.content ?? ''
   if (mode === 'highlight') {
-    highlighted.value = highlightFallback(paste.content)
+    highlighted.value = highlightFallback(content)
     try {
-      const html = await highlightToHtml(paste.content, resolveLang(paste.lang))
+      const html = await highlightToHtml(content, resolveLang(paste.lang))
       if (run === renderRun)
         highlighted.value = html
     }
@@ -209,7 +298,7 @@ async function renderViewFor(paste: PasteFull | null, mode: ViewMode) {
   else if (mode === 'preview') {
     rendered.value = ''
     try {
-      const html = await renderMarkdown(paste.content)
+      const html = await renderMarkdown(content)
       if (run === renderRun)
         rendered.value = html
     }
@@ -320,14 +409,26 @@ async function shorten(p: PasteFull) {
 }
 
 function downloadPaste(p: PasteFull) {
-  const blob = new Blob([p.content], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = url
-  a.download = `${p.title || p.id}.txt`
+  if (p.kind === 'file') {
+    // Use the already-fetched (owner, un-burned) object URL.
+    if (!fileUrl.value)
+      return
+    a.href = fileUrl.value
+    a.download = p.filename || p.id
+  }
+  else {
+    const blob = new Blob([p.content ?? ''], { type: 'text/plain;charset=utf-8' })
+    a.href = URL.createObjectURL(blob)
+    a.download = `${p.title || p.id}.txt`
+    a.click()
+    URL.revokeObjectURL(a.href)
+    return
+  }
   a.click()
-  URL.revokeObjectURL(url)
 }
+
+onBeforeUnmount(clearFileUrl)
 
 onMounted(async () => {
   // Only auth + list once per session; remounts (page switches) reuse shared state.
@@ -453,7 +554,24 @@ onMounted(async () => {
             lg:flex
           ` : 'flex'"
         >
-          <div class="rounded-lg border border-[var(--border-subtle)]">
+          <div
+            class="relative rounded-lg border border-[var(--border-subtle)]"
+            :class="dragOver ? 'border-[var(--accent)]' : ''"
+            @dragover.prevent="dragOver = true"
+            @dragleave.prevent="dragOver = false"
+            @drop.prevent="onDrop"
+          >
+            <input ref="fileInput" type="file" class="hidden" @change="onPickFile">
+            <div
+              v-if="dragOver"
+              class="
+                pointer-events-none absolute inset-0 z-10 grid
+                place-items-center rounded-lg bg-[var(--accent-soft)]
+                text-[13px] font-medium text-[var(--accent)]
+              "
+            >
+              Drop a file to upload
+            </div>
             <input
               v-model="draft.title" placeholder="title (optional)" class="
                 w-full border-b border-[var(--border-subtle)] bg-transparent
@@ -463,7 +581,7 @@ onMounted(async () => {
             >
             <textarea
               v-model="draft.content"
-              placeholder="paste or type…"
+              placeholder="paste or type… (or drop / paste a file)"
               spellcheck="false"
               class="
                 block h-40 w-full resize-y bg-transparent p-3 font-mono
@@ -471,6 +589,7 @@ onMounted(async () => {
                 outline-none
                 placeholder:text-[var(--fg-faint)]
               "
+              @paste="onComposerPaste"
             />
             <div
               class="
@@ -530,6 +649,9 @@ onMounted(async () => {
                   "
                 >
               </div>
+              <button type="button" class="icon-btn shrink-0" title="Attach a file or image" @click="fileInput?.click()">
+                <Paperclip :size="15" :stroke-width="1.75" />
+              </button>
               <button
                 type="button" :disabled="creating" class="btn-accent shrink-0" @click="createPaste"
               >
@@ -563,8 +685,18 @@ onMounted(async () => {
                   shrink-0 text-[var(--fg-muted)]
                 "
               />
-              <span class="min-w-0 flex-1 truncate text-[13px] tracking-tight">{{ p.title || p.id }}</span>
-              <span class="mono-label tracking-normal normal-case">{{ p.lang }}</span>
+              <ImageIcon
+                v-else-if="isInlineImage(p)" :size="13" :stroke-width="1.75" class="
+                  shrink-0 text-[var(--fg-muted)]
+                "
+              />
+              <FileIcon
+                v-else-if="p.kind === 'file'" :size="13" :stroke-width="1.75" class="
+                  shrink-0 text-[var(--fg-muted)]
+                "
+              />
+              <span class="min-w-0 flex-1 truncate text-[13px] tracking-tight">{{ p.title || p.filename || p.id }}</span>
+              <span class="mono-label tracking-normal normal-case">{{ p.kind === 'file' ? 'file' : p.lang }}</span>
               <span
                 class="
                   w-8 text-right font-mono text-[11px] text-[var(--fg-muted)]
@@ -624,7 +756,11 @@ onMounted(async () => {
                 >{{ selected.title || selected.id }}</span>
               </div>
               <div class="flex shrink-0 items-center gap-1">
-                <nav class="mr-2 flex items-center gap-3">
+                <nav
+                  v-if="selected.kind !== 'file'" class="
+                    mr-2 flex items-center gap-3
+                  "
+                >
                   <button
                     v-for="m in (['highlight', 'preview', 'raw'] as const)"
                     :key="m"
@@ -648,7 +784,9 @@ onMounted(async () => {
                     />
                   </button>
                 </nav>
-                <button type="button" class="icon-btn" title="Copy content" @click="copyText(selected.content)">
+                <button
+                  v-if="selected.kind !== 'file'" type="button" class="icon-btn" title="Copy content" @click="copyText(selected.content ?? '')"
+                >
                   <Check v-if="copied" :size="14" :stroke-width="1.75" />
                   <Copy v-else :size="14" :stroke-width="1.75" />
                 </button>
@@ -702,11 +840,38 @@ onMounted(async () => {
             </div>
 
             <div class="min-h-0 min-w-0 flex-1 overflow-auto">
-              <!-- eslint-disable vue/no-v-html -->
-              <div v-show="view === 'highlight'" class="paste-code" v-html="highlighted" />
-              <div v-show="view === 'preview'" class="md-body" v-html="rendered" />
-              <!-- eslint-enable vue/no-v-html -->
-              <pre v-show="view === 'raw'" class="paste-raw">{{ selected.content }}</pre>
+              <template v-if="selected.kind === 'file'">
+                <div class="grid h-full place-items-center p-6">
+                  <img
+                    v-if="isInlineImage(selected) && fileUrl"
+                    :src="fileUrl"
+                    :alt="selected.filename || selected.id"
+                    class="max-h-full max-w-full rounded-md object-contain"
+                  >
+                  <div
+                    v-else class="flex flex-col items-center gap-3 text-center"
+                  >
+                    <FileIcon
+                      :size="40" :stroke-width="1.25" class="
+                        text-[var(--fg-faint)]
+                      "
+                    />
+                    <div class="font-mono text-[13px] text-[var(--fg-muted)]">
+                      {{ selected.filename || selected.id }}
+                    </div>
+                    <button type="button" class="btn-accent" :disabled="!fileUrl" @click="downloadPaste(selected)">
+                      <Download :size="14" :stroke-width="1.75" /> Download
+                    </button>
+                  </div>
+                </div>
+              </template>
+              <template v-else>
+                <!-- eslint-disable vue/no-v-html -->
+                <div v-show="view === 'highlight'" class="paste-code" v-html="highlighted" />
+                <div v-show="view === 'preview'" class="md-body" v-html="rendered" />
+                <!-- eslint-enable vue/no-v-html -->
+                <pre v-show="view === 'raw'" class="paste-raw">{{ selected.content }}</pre>
+              </template>
             </div>
 
             <div
@@ -716,7 +881,7 @@ onMounted(async () => {
               "
             >
               <span class="mono-label">/{{ selected.id }}</span>
-              <span class="font-mono text-[11px] text-[var(--fg-muted)]">{{ resolveLang(selected.lang) }} · {{ formatBytes(selected.content.length) }} · {{ formatExpiry(selected.expiration) }} left</span>
+              <span class="font-mono text-[11px] text-[var(--fg-muted)]">{{ selected.kind === 'file' ? (selected.mime || 'file') : resolveLang(selected.lang) }} · {{ formatBytes(selected.size ?? selected.content?.length ?? 0) }} · {{ formatExpiry(selected.expiration) }} left</span>
               <span
                 v-if="selected.burn" class="
                   ml-auto inline-flex items-center gap-1 font-mono text-[11px]

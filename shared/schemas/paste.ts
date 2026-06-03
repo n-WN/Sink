@@ -10,8 +10,14 @@ export const pasteId = customAlphabet(SHORT_ID_ALPHABET, 8)
 
 export const PASTE_ID_RE = new RegExp(`^[${SHORT_ID_ALPHABET}]{8}$`)
 
-// Clipboard is for text snippets, not large files: cap at 512 KB.
+// Text snippets cap at 512 KB. Files (images / small attachments) cap at 1 MB — large
+// enough for screenshots, small enough that the 1000-active cap stays within 1 GB storage.
 export const MAX_PASTE_SIZE = 512 * 1024
+export const MAX_FILE_SIZE = 1024 * 1024
+
+// Only these image types are served inline; everything else is forced to download (SVG and
+// HTML can execute script, so they are never inlined).
+export const INLINE_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
 
 // Cloudflare KV minimum expiration is 60s; max preset is 30 days.
 export const MIN_PASTE_TTL = 60
@@ -56,7 +62,10 @@ export const CreatePasteSchema = z.object({
 export type CreatePaste = z.infer<typeof CreatePasteSchema>
 
 // Lightweight metadata stored alongside each KV key so listing never reads bodies.
+// For text pastes the body is the JSON Paste; for files the body is the raw bytes and the
+// metadata carries everything (incl. the password hash, since there is no JSON value).
 export interface PasteMeta {
+  kind?: 'text' | 'file' // defaults to 'text' for legacy entries
   lang: string
   title?: string
   createdAt: number
@@ -64,8 +73,39 @@ export interface PasteMeta {
   size: number
   burn?: boolean
   hasPassword?: boolean
+  mime?: string // file pastes
+  filename?: string // file pastes
+  passwordHash?: string // file pastes only; server-side, never returned to clients
 }
 
-export interface PasteListItem extends PasteMeta {
+// What list/UI sees — never includes the password hash.
+export interface PasteListItem {
   id: string
+  kind: 'text' | 'file'
+  lang: string
+  title?: string
+  createdAt: number
+  expiration: number
+  size: number
+  burn?: boolean
+  hasPassword?: boolean
+  mime?: string
+  filename?: string
+}
+
+// Normalized record returned by the store regardless of kind.
+export interface PasteRecord {
+  id: string
+  kind: 'text' | 'file'
+  lang: string
+  title?: string
+  createdAt: number
+  expiration: number
+  burn: boolean
+  password?: string // PBKDF2 hash
+  size: number
+  mime?: string
+  filename?: string
+  content?: string // text only
+  bytes?: ArrayBuffer // file only
 }

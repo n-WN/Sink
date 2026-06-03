@@ -39,3 +39,25 @@ export async function kvPutJson<T>(
 export async function kvDelete(event: H3Event, prefix: KvPrefix, id: string): Promise<void> {
   await kv(event).delete(kvKey(prefix, id))
 }
+
+// Binary variants for file pastes (the value is raw bytes, everything else is in metadata).
+export async function kvPutBytes(
+  event: H3Event,
+  prefix: KvPrefix,
+  id: string,
+  value: ArrayBuffer | ArrayBufferView,
+  options?: { expiration?: number, metadata?: Record<string, unknown> },
+): Promise<void> {
+  await kv(event).put(kvKey(prefix, id), value, options)
+}
+
+// Reads the value as an ArrayBuffer plus metadata. Used to read either kind: text bodies are
+// the JSON string bytes (decode + parse), file bodies are the raw bytes.
+export async function kvGetBytesWithMetadata<M = Record<string, unknown>>(
+  event: H3Event,
+  prefix: KvPrefix,
+  id: string,
+): Promise<{ value: ArrayBuffer | null, metadata: M | null }> {
+  const { value, metadata } = await kv(event).getWithMetadata(kvKey(prefix, id), { type: 'arrayBuffer' })
+  return { value: value as ArrayBuffer | null, metadata: metadata as M | null }
+}

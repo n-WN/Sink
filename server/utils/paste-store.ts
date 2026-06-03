@@ -1,8 +1,20 @@
 import type { H3Event } from 'h3'
-import type { Paste, PasteListItem, PasteMeta } from '#shared/schemas/paste'
+import type { Paste, PasteListItem, PasteMeta, PasteRecord } from '#shared/schemas/paste'
 import { MAX_ACTIVE_PASTES } from '#shared/schemas/paste'
 
 const PASTE_PREFIX = 'paste:'
+
+export interface FilePasteInput {
+  id: string
+  bytes: ArrayBuffer
+  mime: string
+  filename?: string
+  title?: string
+  createdAt: number
+  expiration: number
+  burn: boolean
+  password?: string // PBKDF2 hash
+}
 
 // True when there are already MAX_ACTIVE_PASTES live snippets (one cheap list op).
 // Guards the free-tier KV budget against a runaway client filling storage.
@@ -16,6 +28,7 @@ export async function pasteCapReached(event: H3Event): Promise<boolean> {
 
 export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
   const metadata: PasteMeta = {
+    kind: 'text',
     lang: paste.lang,
     title: paste.title,
     createdAt: paste.createdAt,
@@ -27,8 +40,61 @@ export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
   await kvPutJson(event, 'paste', paste.id, paste, { expiration: paste.expiration, metadata })
 }
 
-export async function getPaste(event: H3Event, id: string): Promise<Paste | null> {
-  return await kvGetJson<Paste>(event, 'paste', id)
+export async function putFilePaste(event: H3Event, file: FilePasteInput): Promise<void> {
+  const metadata: PasteMeta = {
+    kind: 'file',
+    lang: 'text',
+    title: file.title,
+    createdAt: file.createdAt,
+    expiration: file.expiration,
+    size: file.bytes.byteLength,
+    burn: file.burn || undefined,
+    hasPassword: file.password ? true : undefined,
+    mime: file.mime,
+    filename: file.filename,
+    passwordHash: file.password, // file bodies are bytes, so the hash lives in metadata
+  }
+  await kvPutBytes(event, 'paste', file.id, file.bytes, { expiration: file.expiration, metadata })
+}
+
+// Reads a paste of either kind into a normalized record. Reads the body as bytes: text bodies
+// are JSON (decode + parse); file bodies are the raw bytes. Legacy entries (no kind) are text.
+export async function getPasteRecord(event: H3Event, id: string): Promise<PasteRecord | null> {
+  const { value, metadata } = await kvGetBytesWithMetadata<PasteMeta>(event, 'paste', id)
+  if (!value)
+    return null
+  const meta = metadata ?? ({} as PasteMeta)
+
+  if (meta.kind === 'file') {
+    return {
+      id,
+      kind: 'file',
+      lang: 'text',
+      title: meta.title,
+      createdAt: meta.createdAt ?? 0,
+      expiration: meta.expiration ?? 0,
+      burn: !!meta.burn,
+      password: meta.passwordHash,
+      size: meta.size ?? value.byteLength,
+      mime: meta.mime,
+      filename: meta.filename,
+      bytes: value,
+    }
+  }
+
+  const paste = JSON.parse(new TextDecoder().decode(value)) as Paste
+  return {
+    id: paste.id,
+    kind: 'text',
+    lang: paste.lang,
+    title: paste.title,
+    createdAt: paste.createdAt,
+    expiration: paste.expiration,
+    burn: !!paste.burn,
+    password: paste.password,
+    size: paste.content.length,
+    content: paste.content,
+  }
 }
 
 export async function deletePaste(event: H3Event, id: string): Promise<void> {
@@ -55,6 +121,7 @@ export async function listPastes(event: H3Event, options: { limit: number, curso
     const meta = (key.metadata ?? {}) as Partial<PasteMeta>
     return {
       id: key.name.slice(PASTE_PREFIX.length),
+      kind: meta.kind ?? 'text',
       lang: meta.lang ?? 'text',
       title: meta.title,
       createdAt: meta.createdAt ?? 0,
@@ -62,6 +129,8 @@ export async function listPastes(event: H3Event, options: { limit: number, curso
       size: meta.size ?? 0,
       burn: meta.burn,
       hasPassword: meta.hasPassword,
+      mime: meta.mime,
+      filename: meta.filename,
     } satisfies PasteListItem
   })
 

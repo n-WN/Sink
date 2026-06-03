@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Check, ClipboardList, Copy, Download, Flame, Loader, LockKeyhole } from 'lucide-vue-next'
+import { Check, ClipboardList, Copy, Download, File as FileIcon, Flame, Loader, LockKeyhole } from 'lucide-vue-next'
 import { highlightFallback, highlightToHtml, resolveLang } from '@/composables/useHighlighter'
 import { renderMarkdown } from '@/composables/useMarkdown'
 
@@ -7,14 +7,20 @@ definePageMeta({ layout: false })
 
 type ViewMode = 'highlight' | 'raw' | 'preview'
 
+const INLINE_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif'])
+
 interface SharedPaste {
   id: string
-  content: string
+  kind: 'text' | 'file'
+  content?: string
   lang: string
   title?: string
   burn: boolean
   hasPassword: boolean
   expiration: number
+  size?: number
+  mime?: string
+  filename?: string
 }
 
 const route = useRoute()
@@ -23,6 +29,7 @@ const id = computed(() => String(route.params.id ?? ''))
 const status = ref<'loading' | 'ok' | 'password' | 'error'>('loading')
 const errorMsg = ref('')
 const passwordInput = ref('')
+const usedPassword = ref('')
 const submitting = ref(false)
 
 const paste = ref<SharedPaste | null>(null)
@@ -31,6 +38,26 @@ const highlighted = ref('')
 const rendered = ref('')
 const copied = ref(false)
 let renderRun = 0
+
+const isImage = computed(() => paste.value?.kind === 'file' && !!paste.value.mime && INLINE_IMAGE_MIME.has(paste.value.mime))
+// The file is fetched as a blob (password via header, never in the URL) into an object URL.
+const fileUrl = ref('')
+
+function clearFileUrl() {
+  if (fileUrl.value) {
+    URL.revokeObjectURL(fileUrl.value)
+    fileUrl.value = ''
+  }
+}
+
+async function loadFile() {
+  clearFileUrl()
+  const headers: Record<string, string> = {}
+  if (usedPassword.value)
+    headers['x-paste-password'] = usedPassword.value
+  const blob = await $fetch<Blob>(`/api/paste/${id.value}/raw`, { headers, responseType: 'blob' })
+  fileUrl.value = URL.createObjectURL(blob)
+}
 
 useHead(() => ({ title: paste.value?.title ? `${paste.value.title} · clip` : `clip / ${id.value}` }))
 
@@ -55,9 +82,13 @@ async function load(password?: string) {
     if (run !== loadRun || reqId !== id.value)
       return // route changed mid-flight; drop stale response
     paste.value = res
+    usedPassword.value = password ?? ''
     view.value = resolveLang(res.lang) === 'markdown' ? 'preview' : 'highlight'
     status.value = 'ok'
-    await renderView()
+    if (res.kind === 'file')
+      await loadFile()
+    else
+      await renderView()
   }
   catch (e: unknown) {
     if (run !== loadRun || reqId !== id.value)
@@ -87,13 +118,14 @@ async function load(password?: string) {
 }
 
 async function renderView() {
-  if (!paste.value)
+  if (!paste.value || paste.value.kind === 'file')
     return
   const run = ++renderRun
+  const content = paste.value.content ?? ''
   if (view.value === 'highlight') {
-    highlighted.value = highlightFallback(paste.value.content)
+    highlighted.value = highlightFallback(content)
     try {
-      const html = await highlightToHtml(paste.value.content, resolveLang(paste.value.lang))
+      const html = await highlightToHtml(content, resolveLang(paste.value.lang))
       if (run === renderRun)
         highlighted.value = html
     }
@@ -101,7 +133,7 @@ async function renderView() {
   }
   else if (view.value === 'preview') {
     try {
-      const html = await renderMarkdown(paste.value.content)
+      const html = await renderMarkdown(content)
       if (run === renderRun)
         rendered.value = html
     }
@@ -118,9 +150,12 @@ watch(() => route.params.id, () => {
   rendered.value = ''
   passwordInput.value = ''
   errorMsg.value = ''
+  clearFileUrl()
   status.value = 'loading'
   load()
 })
+
+onBeforeUnmount(clearFileUrl)
 
 async function copyText(text: string) {
   try {
@@ -170,7 +205,7 @@ onMounted(() => {
         </NuxtLink>
         <span class="mono-label">shared</span>
       </div>
-      <span v-if="paste" class="mono-label">{{ resolveLang(paste.lang) }}</span>
+      <span v-if="paste" class="mono-label">{{ paste.kind === 'file' ? (paste.mime || 'file') : resolveLang(paste.lang) }}</span>
     </header>
 
     <ClientOnly>
@@ -259,7 +294,9 @@ onMounted(() => {
         >
           <span class="truncate font-mono text-[13px] text-[var(--fg-muted)]">{{ paste.title || paste.id }}</span>
           <div class="flex shrink-0 items-center gap-1">
-            <nav class="mr-2 flex items-center gap-3">
+            <nav
+              v-if="paste.kind !== 'file'" class="mr-2 flex items-center gap-3"
+            >
               <button
                 v-for="m in (['highlight', 'preview', 'raw'] as const)"
                 :key="m"
@@ -282,22 +319,55 @@ onMounted(() => {
                 />
               </button>
             </nav>
-            <button type="button" class="icon-btn" title="Copy content" @click="copyText(paste.content)">
+            <button v-if="paste.kind !== 'file'" type="button" class="icon-btn" title="Copy content" @click="copyText(paste.content ?? '')">
               <Check v-if="copied" :size="14" :stroke-width="1.75" />
               <Copy v-else :size="14" :stroke-width="1.75" />
             </button>
-            <button type="button" class="icon-btn" title="Download" @click="download">
+            <a
+              v-if="paste.kind === 'file'" :href="fileUrl" :download="paste.filename || paste.id" class="
+                icon-btn
+              " title="Download"
+            >
+              <Download :size="14" :stroke-width="1.75" />
+            </a>
+            <button v-else type="button" class="icon-btn" title="Download" @click="download">
               <Download :size="14" :stroke-width="1.75" />
             </button>
           </div>
         </div>
 
         <div class="min-h-0 min-w-0 flex-1 overflow-auto">
-          <!-- eslint-disable vue/no-v-html -->
-          <div v-show="view === 'highlight'" class="paste-code" v-html="highlighted" />
-          <div v-show="view === 'preview'" class="md-body" v-html="rendered" />
-          <!-- eslint-enable vue/no-v-html -->
-          <pre v-show="view === 'raw'" class="paste-raw">{{ paste.content }}</pre>
+          <template v-if="paste.kind === 'file'">
+            <div class="grid h-full place-items-center p-6">
+              <img
+                v-if="isImage" :src="fileUrl" :alt="paste.filename || paste.id" class="
+                  max-h-full max-w-full rounded-md object-contain
+                "
+              >
+              <div v-else class="flex flex-col items-center gap-3 text-center">
+                <FileIcon
+                  :size="40" :stroke-width="1.25" class="text-[var(--fg-faint)]"
+                />
+                <div class="font-mono text-[13px] text-[var(--fg-muted)]">
+                  {{ paste.filename || paste.id }}
+                </div>
+                <a
+                  :href="fileUrl" :download="paste.filename || paste.id" class="
+                    btn-accent
+                  "
+                >
+                  <Download :size="14" :stroke-width="1.75" /> Download
+                </a>
+              </div>
+            </div>
+          </template>
+          <template v-else>
+            <!-- eslint-disable vue/no-v-html -->
+            <div v-show="view === 'highlight'" class="paste-code" v-html="highlighted" />
+            <div v-show="view === 'preview'" class="md-body" v-html="rendered" />
+            <!-- eslint-enable vue/no-v-html -->
+            <pre v-show="view === 'raw'" class="paste-raw">{{ paste.content }}</pre>
+          </template>
         </div>
 
         <div
@@ -306,7 +376,7 @@ onMounted(() => {
             border-[var(--border-subtle)] px-4 py-2
           "
         >
-          <span class="font-mono text-[11px] text-[var(--fg-muted)]">{{ formatBytes(paste.content.length) }}</span>
+          <span class="font-mono text-[11px] text-[var(--fg-muted)]">{{ formatBytes(paste.size ?? paste.content?.length ?? 0) }}</span>
           <span
             v-if="paste.burn" class="
               inline-flex items-center gap-1 font-mono text-[11px]
