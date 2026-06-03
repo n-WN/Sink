@@ -65,7 +65,44 @@ export function resolveLang(lang: string | undefined | null): string {
   return LANG_ALIASES[id] ?? id
 }
 
+// Per-language grammar loaders. Grammars are only ~10-40 KB each but loading all ~30 up
+// front made the first highlight wait on every import. We now load just the one language a
+// snippet needs, on demand.
+type LangImport = () => Promise<{ default: unknown }>
+const LANG_LOADERS: Record<string, LangImport> = {
+  typescript: () => import('shiki/langs/typescript.mjs'),
+  javascript: () => import('shiki/langs/javascript.mjs'),
+  tsx: () => import('shiki/langs/tsx.mjs'),
+  jsx: () => import('shiki/langs/jsx.mjs'),
+  vue: () => import('shiki/langs/vue.mjs'),
+  json: () => import('shiki/langs/json.mjs'),
+  yaml: () => import('shiki/langs/yaml.mjs'),
+  toml: () => import('shiki/langs/toml.mjs'),
+  html: () => import('shiki/langs/html.mjs'),
+  xml: () => import('shiki/langs/xml.mjs'),
+  css: () => import('shiki/langs/css.mjs'),
+  markdown: () => import('shiki/langs/markdown.mjs'),
+  bash: () => import('shiki/langs/bash.mjs'),
+  python: () => import('shiki/langs/python.mjs'),
+  go: () => import('shiki/langs/go.mjs'),
+  rust: () => import('shiki/langs/rust.mjs'),
+  java: () => import('shiki/langs/java.mjs'),
+  c: () => import('shiki/langs/c.mjs'),
+  cpp: () => import('shiki/langs/cpp.mjs'),
+  csharp: () => import('shiki/langs/csharp.mjs'),
+  php: () => import('shiki/langs/php.mjs'),
+  ruby: () => import('shiki/langs/ruby.mjs'),
+  sql: () => import('shiki/langs/sql.mjs'),
+  lua: () => import('shiki/langs/lua.mjs'),
+  swift: () => import('shiki/langs/swift.mjs'),
+  kotlin: () => import('shiki/langs/kotlin.mjs'),
+  dockerfile: () => import('shiki/langs/docker.mjs'),
+  ini: () => import('shiki/langs/ini.mjs'),
+  diff: () => import('shiki/langs/diff.mjs'),
+}
+
 let highlighterPromise: Promise<HighlighterCore> | null = null
+const loadedLangs = new Set<string>()
 
 function loadHighlighter(): Promise<HighlighterCore> {
   if (!highlighterPromise) {
@@ -74,37 +111,8 @@ function loadHighlighter(): Promise<HighlighterCore> {
         () => import('shiki/themes/vitesse-light.mjs'),
         () => import('shiki/themes/vitesse-dark.mjs'),
       ],
-      langs: [
-        () => import('shiki/langs/typescript.mjs'),
-        () => import('shiki/langs/javascript.mjs'),
-        () => import('shiki/langs/tsx.mjs'),
-        () => import('shiki/langs/jsx.mjs'),
-        () => import('shiki/langs/vue.mjs'),
-        () => import('shiki/langs/json.mjs'),
-        () => import('shiki/langs/yaml.mjs'),
-        () => import('shiki/langs/toml.mjs'),
-        () => import('shiki/langs/html.mjs'),
-        () => import('shiki/langs/xml.mjs'),
-        () => import('shiki/langs/css.mjs'),
-        () => import('shiki/langs/markdown.mjs'),
-        () => import('shiki/langs/bash.mjs'),
-        () => import('shiki/langs/python.mjs'),
-        () => import('shiki/langs/go.mjs'),
-        () => import('shiki/langs/rust.mjs'),
-        () => import('shiki/langs/java.mjs'),
-        () => import('shiki/langs/c.mjs'),
-        () => import('shiki/langs/cpp.mjs'),
-        () => import('shiki/langs/csharp.mjs'),
-        () => import('shiki/langs/php.mjs'),
-        () => import('shiki/langs/ruby.mjs'),
-        () => import('shiki/langs/sql.mjs'),
-        () => import('shiki/langs/lua.mjs'),
-        () => import('shiki/langs/swift.mjs'),
-        () => import('shiki/langs/kotlin.mjs'),
-        () => import('shiki/langs/docker.mjs'),
-        () => import('shiki/langs/ini.mjs'),
-        () => import('shiki/langs/diff.mjs'),
-      ],
+      // Languages are loaded lazily per snippet (see highlightToHtml), not all up front.
+      langs: [],
       // `forgiving` keeps highlighting working in Safari/Firefox: the JS RegExp engine
       // compiles TextMate grammars to native RegExp, and some patterns that V8 accepts are
       // rejected elsewhere. Without it one bad pattern drops the whole block to plaintext.
@@ -131,10 +139,20 @@ export function highlightFallback(code: string): string {
   return `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`
 }
 
-/** Highlight code to themed HTML. Unknown/unloaded languages degrade to plain text. */
+/**
+ * Highlight code to themed HTML. The one needed grammar is loaded on demand; unknown
+ *  languages degrade to plain text (always available in Shiki core).
+ */
 export async function highlightToHtml(code: string, lang: string): Promise<string> {
   const h = await loadHighlighter()
-  const safeLang = h.getLoadedLanguages().includes(lang) ? lang : 'text'
+  let safeLang = 'text'
+  if (LANG_LOADERS[lang]) {
+    if (!loadedLangs.has(lang)) {
+      await h.loadLanguage(LANG_LOADERS[lang] as Parameters<typeof h.loadLanguage>[0])
+      loadedLangs.add(lang)
+    }
+    safeLang = lang
+  }
   return h.codeToHtml(code, {
     lang: safeLang,
     themes: THEMES,

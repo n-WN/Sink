@@ -2,6 +2,10 @@ import type { Link } from '@/types'
 import { parsePath, withQuery } from 'ufo'
 
 const TRIM_SLASHES_RE = /^\/|\/$/g
+// `<slug>/raw` secondary route, and detecting a paste share view (/s/<8-char id>) destination.
+const RAW_SUFFIX_RE = /^([^/?#]+)\/raw$/
+// eslint-disable-next-line regexp/prefer-range
+const PASTE_VIEW_URL_RE = /\/s\/([23456789abcdefghjkmnpqrstuvwxyz]{8})(?:[/?#]|$)/
 
 const SOCIAL_BOTS = [
   'applebot',
@@ -63,6 +67,27 @@ export default eventHandler(async (event) => {
   // Bypass redirect check for notFoundRedirect path to prevent infinite loop
   if (notFoundRedirect && event.path === notFoundRedirect) {
     return
+  }
+
+  // Secondary route: `/<slug>/raw` exposes a short link's content as plain text instead of
+  // redirecting (curl-/copy-friendly). If the link points at one of our paste share views,
+  // hand off to the paste raw endpoint (which keeps password/burn/hardening/rate-limit);
+  // otherwise just return the destination URL as text.
+  const rawMatch = event.path.replace(TRIM_SLASHES_RE, '').match(RAW_SUFFIX_RE)
+  if (rawMatch && cloudflare) {
+    const rawSlug = caseSensitive ? rawMatch[1] : rawMatch[1].toLowerCase()
+    if (!reserveSlug.includes(rawSlug) && slugRegex.test(rawSlug)) {
+      const rawLink = await getLink(event, rawSlug, linkCacheTtl)
+      if (rawLink) {
+        const pasteId = rawLink.url.match(PASTE_VIEW_URL_RE)?.[1]
+        if (pasteId)
+          return sendRedirect(event, `/api/paste/${pasteId}/raw`, 302)
+        setHeader(event, 'Content-Type', 'text/plain; charset=utf-8')
+        setHeader(event, 'Cache-Control', 'no-store')
+        setHeader(event, 'Referrer-Policy', 'no-referrer')
+        return rawLink.url
+      }
+    }
   }
 
   if (slug && !reserveSlug.includes(slug) && slugRegex.test(slug) && cloudflare) {
