@@ -1,12 +1,13 @@
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
 import { LINK_PASSWORD_MASK_PREFIX } from '../utils/link-password'
+import { SHORT_ID_ALPHABET } from '../utils/short-id'
 
 const { slugRegex } = useAppConfig()
 
 const slugDefaultLength = +useRuntimeConfig().public.slugDefaultLength
 
-export const nanoid = (length: number = slugDefaultLength) => customAlphabet('23456789abcdefghjkmnpqrstuvwxyz', length)
+export const nanoid = (length: number = slugDefaultLength) => customAlphabet(SHORT_ID_ALPHABET, length)
 
 const GeoSchema = z.preprocess((value) => {
   if (!value || typeof value !== 'object' || Array.isArray(value))

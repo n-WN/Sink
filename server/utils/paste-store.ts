@@ -15,7 +15,6 @@ export async function pasteCapReached(event: H3Event): Promise<boolean> {
 }
 
 export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
-  const { KV } = event.context.cloudflare.env
   const metadata: PasteMeta = {
     lang: paste.lang,
     title: paste.title,
@@ -25,20 +24,15 @@ export async function putPaste(event: H3Event, paste: Paste): Promise<void> {
     burn: paste.burn || undefined,
     hasPassword: paste.password ? true : undefined,
   }
-  await KV.put(`${PASTE_PREFIX}${paste.id}`, JSON.stringify(paste), {
-    expiration: paste.expiration,
-    metadata,
-  })
+  await kvPutJson(event, 'paste', paste.id, paste, { expiration: paste.expiration, metadata })
 }
 
 export async function getPaste(event: H3Event, id: string): Promise<Paste | null> {
-  const { KV } = event.context.cloudflare.env
-  return await KV.get(`${PASTE_PREFIX}${id}`, { type: 'json' }) as Paste | null
+  return await kvGetJson<Paste>(event, 'paste', id)
 }
 
 export async function deletePaste(event: H3Event, id: string): Promise<void> {
-  const { KV } = event.context.cloudflare.env
-  await KV.delete(`${PASTE_PREFIX}${id}`)
+  await kvDelete(event, 'paste', id)
 }
 
 interface ListPastesResult {

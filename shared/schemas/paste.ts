@@ -1,15 +1,14 @@
 import { customAlphabet } from 'nanoid'
 import { z } from 'zod'
+import { SHORT_ID_ALPHABET } from '../utils/short-id'
 
-// Short, unambiguous id alphabet (no look-alike chars), 8 chars by default.
-const PASTE_ID_ALPHABET = '23456789abcdefghjkmnpqrstuvwxyz'
-export const pasteId = customAlphabet(PASTE_ID_ALPHABET, 8)
+// Paste ids: 8 chars of the shared short-id alphabet (no 0/1/i/l/o).
+export const pasteId = customAlphabet(SHORT_ID_ALPHABET, 8)
 
-// Validates a paste id taken from the URL before it is used as a KV key.
-// Built from the alphabet above to stay in sync; disable the range hint since the
-// alphabet intentionally omits look-alike characters (0/1/i/l/o).
-// eslint-disable-next-line regexp/prefer-range
-export const PASTE_ID_RE = new RegExp(`^[${PASTE_ID_ALPHABET}]{8}$`)
+// Validates a paste id taken from the URL before it is used as a KV key. Built from the
+// shared alphabet; disable the range hint since it intentionally omits look-alikes.
+
+export const PASTE_ID_RE = new RegExp(`^[${SHORT_ID_ALPHABET}]{8}$`)
 
 // Clipboard is for text snippets, not large files: cap at 512 KB.
 export const MAX_PASTE_SIZE = 512 * 1024
