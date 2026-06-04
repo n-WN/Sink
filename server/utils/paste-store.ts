@@ -1,8 +1,22 @@
 import type { H3Event } from 'h3'
 import type { Paste, PasteListItem, PasteMeta, PasteRecord } from '#shared/schemas/paste'
-import { MAX_ACTIVE_PASTES } from '#shared/schemas/paste'
+import { ANON_DAILY_CREATE_CAP, MAX_ACTIVE_PASTES } from '#shared/schemas/paste'
 
 const PASTE_PREFIX = 'paste:'
+
+// Best-effort per-UTC-day cap on anonymous creates (KV is not atomic, so a burst can
+// overshoot slightly — acceptable). Returns true if the day's cap is already reached; else
+// increments the counter and returns false. The site-token owner should not call this.
+export async function anonDailyCreateCapReached(event: H3Event): Promise<boolean> {
+  const { KV } = event.context.cloudflare.env
+  const day = new Date().toISOString().slice(0, 10)
+  const key = `paste:create:day:${day}`
+  const current = Number(await KV.get(key)) || 0
+  if (current >= ANON_DAILY_CREATE_CAP)
+    return true
+  await KV.put(key, String(current + 1), { expirationTtl: 2 * 24 * 3600 })
+  return false
+}
 
 export interface FilePasteInput {
   id: string

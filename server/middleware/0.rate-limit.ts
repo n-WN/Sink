@@ -49,6 +49,11 @@ export default eventHandler(async (event) => {
     return
   }
 
+  if (event.method === 'POST' && path === '/api/paste/create') {
+    await enforce(event, env.RL_CREATE_IP, ip) // anonymous create rate per IP
+    return
+  }
+
   if (path === '/api/verify')
     await enforce(event, env.RL_VERIFY, ip) // site-token guessing
 })

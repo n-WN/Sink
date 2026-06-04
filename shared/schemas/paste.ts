@@ -28,6 +28,11 @@ export const DEFAULT_PASTE_TTL = 24 * 3600
 // a runaway client from filling storage. Generous for a single-user clipboard.
 export const MAX_ACTIVE_PASTES = 1000
 
+// Public (anonymous) creates per UTC day. Protects the free KV write budget (~1000/day):
+// each anon create costs 1 counter write + 1 paste write, so ~400 leaves headroom for the
+// owner. The site-token owner is not counted.
+export const ANON_DAILY_CREATE_CAP = 400
+
 const now = () => Math.floor(Date.now() / 1000)
 
 export const READ_PASSWORD_MAX = 128

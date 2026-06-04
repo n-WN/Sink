@@ -38,9 +38,33 @@ const ready = useState('clip-ready', () => false)
 const authed = useState('clip-authed', () => false)
 const listed = useState('clip-listed', () => false)
 const pastes = useState<PasteListItem[]>('clip-pastes', () => [])
+// Anonymous visitors don't get the owner list (that would leak every id); they see only the
+// snippets they created this session, tracked client-side.
+const sessionPastes = useState<PasteListItem[]>('clip-session', () => [])
+const SESSION_KEY = 'clip-session-pastes'
 
 const tokenInput = ref('')
 const unlocking = ref(false)
+const showUnlock = ref(false)
+
+// What the left column lists, and where a snippet opens: owner -> private /p/:id, anon -> /s/:id.
+const displayedList = computed(() => (authed.value ? pastes.value : sessionPastes.value))
+function targetPath(id: string): string {
+  return authed.value ? `/p/${id}` : `/s/${id}`
+}
+function rememberSession(paste: PasteListItem) {
+  sessionPastes.value = [paste, ...sessionPastes.value.filter(p => p.id !== paste.id)].slice(0, 50)
+  if (import.meta.client)
+    localStorage.setItem(SESSION_KEY, JSON.stringify(sessionPastes.value))
+}
+function loadSession() {
+  if (!import.meta.client)
+    return
+  try {
+    sessionPastes.value = JSON.parse(localStorage.getItem(SESSION_KEY) || '[]')
+  }
+  catch { /* ignore */ }
+}
 
 const draft = reactive({ title: '', lang: 'auto', ttl: 86400, content: '', burn: false, password: '' })
 const creating = ref(false)
@@ -108,6 +132,7 @@ async function unlock() {
   setToken(tokenInput.value)
   if (await checkAuth()) {
     authed.value = true
+    showUnlock.value = false
     tokenInput.value = ''
     await loadList()
     listed.value = true
@@ -149,13 +174,16 @@ async function createPaste() {
         password: draft.password || undefined,
       },
     })
-    pastes.value = [res.paste, ...pastes.value]
+    if (authed.value)
+      pastes.value = [res.paste, ...pastes.value]
+    else
+      rememberSession(res.paste)
     draft.content = ''
     draft.title = ''
     draft.password = ''
     draft.burn = false
     toast.success('Saved', { description: `/${res.paste.id}` })
-    navigateTo(`/p/${res.paste.id}`)
+    navigateTo(targetPath(res.paste.id))
   }
   catch (e) {
     toast.error('Failed to save', { description: e instanceof Error ? e.message : String(e) })
@@ -189,12 +217,15 @@ async function uploadFile(file: File) {
     if (draft.password)
       form.append('password', draft.password)
     const res = await useAPI<{ paste: PasteListItem }>('/api/paste/create', { method: 'POST', body: form })
-    pastes.value = [res.paste, ...pastes.value]
+    if (authed.value)
+      pastes.value = [res.paste, ...pastes.value]
+    else
+      rememberSession(res.paste)
     draft.title = ''
     draft.password = ''
     draft.burn = false
     toast.success('Uploaded', { description: file.name })
-    navigateTo(`/p/${res.paste.id}`)
+    navigateTo(targetPath(res.paste.id))
   }
   catch (e) {
     toast.error('Upload failed', { description: e instanceof Error ? e.message : String(e) })
@@ -431,6 +462,7 @@ function downloadPaste(p: PasteFull) {
 onBeforeUnmount(clearFileUrl)
 
 onMounted(async () => {
+  loadSession()
   // Only auth + list once per session; remounts (page switches) reuse shared state.
   if (!ready.value) {
     authed.value = await checkAuth()
@@ -469,8 +501,9 @@ onMounted(async () => {
         <span class="mono-label">temporary</span>
       </div>
       <div class="flex items-center gap-3">
-        <span v-if="authed" class="mono-label">{{ pastes.length }} snippet{{ pastes.length === 1 ? '' : 's' }}</span>
+        <span class="mono-label">{{ displayedList.length }} snippet{{ displayedList.length === 1 ? '' : 's' }}</span>
         <NuxtLink
+          v-if="authed"
           to="/dashboard" class="
             mono-label transition-colors
             hover:text-[var(--fg-primary)]
@@ -479,12 +512,12 @@ onMounted(async () => {
           dashboard
         </NuxtLink>
         <button
-          v-if="authed" type="button" class="
+          type="button" class="
             mono-label transition-colors
             hover:text-[var(--fg-primary)]
-          " @click="lock"
+          " @click="authed ? lock() : (showUnlock = true)"
         >
-          lock
+          {{ authed ? 'lock' : 'unlock' }}
         </button>
       </div>
     </header>
@@ -498,8 +531,8 @@ onMounted(async () => {
         <Loader :size="18" class="animate-spin" />
       </div>
 
-      <!-- Auth gate -->
-      <div v-else-if="!authed" class="grid flex-1 place-items-center px-4">
+      <!-- Owner unlock (opened on demand; anonymous users can use the app without it) -->
+      <div v-else-if="showUnlock" class="grid flex-1 place-items-center px-4">
         <div
           class="
             w-full max-w-sm rounded-xl border border-[var(--border-subtle)] p-6
@@ -508,11 +541,11 @@ onMounted(async () => {
           <div class="flex items-center gap-2">
             <Lock :size="15" :stroke-width="1.75" class="text-[var(--accent)]" />
             <h2 class="text-[17px] font-semibold tracking-[-0.02em]">
-              Enter site token
+              Owner unlock
             </h2>
           </div>
           <p class="mt-1 text-[14px] tracking-[-0.016em] text-[var(--fg-muted)]">
-            This clipboard is protected.
+            Enter the site token to manage all snippets.
           </p>
           <form class="mt-5" @submit.prevent="unlock">
             <label class="mono-label">token</label>
@@ -530,6 +563,14 @@ onMounted(async () => {
             >
               <Loader v-if="unlocking" :size="14" class="animate-spin" />
               Unlock
+            </button>
+            <button
+              type="button" class="
+                mono-label mt-3 w-full text-center transition-colors
+                hover:text-[var(--fg-primary)]
+              " @click="showUnlock = false"
+            >
+              cancel
             </button>
           </form>
         </div>
@@ -664,7 +705,7 @@ onMounted(async () => {
 
           <div class="flex flex-col gap-0.5">
             <button
-              v-for="p in pastes"
+              v-for="p in displayedList"
               :key="p.id"
               type="button"
               class="
@@ -673,7 +714,7 @@ onMounted(async () => {
                 hover:bg-[var(--bg-hover)]
               "
               :class="selected?.id === p.id ? 'bg-[var(--accent-soft)]' : ''"
-              @click="navigateTo(`/p/${p.id}`)"
+              @click="navigateTo(targetPath(p.id))"
             >
               <Flame
                 v-if="p.burn" :size="13" :stroke-width="1.75" class="
@@ -705,12 +746,12 @@ onMounted(async () => {
               >{{ formatExpiry(p.expiration) }}</span>
             </button>
             <div
-              v-if="!pastes.length" class="
+              v-if="!displayedList.length" class="
                 rounded-md border border-dashed border-[var(--border-subtle)]
                 px-3 py-10 text-center text-[12px] text-[var(--fg-muted)]
               "
             >
-              No snippets yet.
+              {{ authed ? 'No snippets yet.' : 'Snippets you create here will appear in this list.' }}
             </div>
           </div>
         </section>

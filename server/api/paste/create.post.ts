@@ -3,6 +3,17 @@ import { CreatePasteSchema, DEFAULT_PASTE_TTL, MAX_FILE_SIZE, MAX_PASTE_TTL, MIN
 // A valid-ish MIME type; anything else is stored as application/octet-stream (which is never
 // served inline), so a junk/CRLF Content-Type can't reach the response header.
 const MIME_RE = /^[\w.+-]+\/[\w.+-]+$/
+const BEARER_RE = /^Bearer\s+/
+
+// Anonymous (no valid site token) creates are bounded per day to protect the free KV write
+// budget; the owner is exempt. Returns true once the day's cap is hit.
+async function anonCapHit(event: import('h3').H3Event): Promise<boolean> {
+  const token = getHeader(event, 'Authorization')?.replace(BEARER_RE, '') || ''
+  const isOwner = safeEqual(token, useRuntimeConfig(event).siteToken)
+  if (isOwner)
+    return false
+  return await anonDailyCreateCapReached(event)
+}
 
 defineRouteMeta({
   openAPI: {
@@ -49,6 +60,8 @@ export default eventHandler(async (event) => {
 
     if (await pasteCapReached(event))
       throw createError({ status: 429, statusText: 'Too many active snippets' })
+    if (await anonCapHit(event))
+      throw createError({ status: 429, statusText: 'Daily limit reached, try tomorrow' })
 
     const expiration = createdAt + clampTtl(field('ttl'))
     const password = field('password')?.slice(0, READ_PASSWORD_MAX) || undefined
@@ -96,6 +109,8 @@ export default eventHandler(async (event) => {
 
   if (await pasteCapReached(event))
     throw createError({ status: 429, statusText: 'Too many active snippets' })
+  if (await anonCapHit(event))
+    throw createError({ status: 429, statusText: 'Daily limit reached, try tomorrow' })
 
   const expiration = createdAt + (input.ttl ?? DEFAULT_PASTE_TTL)
 
